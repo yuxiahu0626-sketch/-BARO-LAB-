@@ -1,4 +1,4 @@
-#include <Arduino.h>
+include <Arduino.h>
 #include <M5Unified.h>
 #include <M5GFX.h>
 #include <Wire.h>
@@ -13,6 +13,7 @@ bool sensors=false,valid=false,havePrevious=false,dirty=true;
 uint32_t sampleAt=0,lastSample=0,screenAt=0;
 unsigned updates=0;
 String lastView;
+const char* statusLine="CHECK SENSOR READINGS";
 void sample(){
  sensors_event_t humidity,temperature;
  bool ok=aht.getEvent(&humidity,&temperature);
@@ -40,7 +41,7 @@ void render(){
  snprintf(density,sizeof density,"%.2f kg/m3",rho);
  snprintf(strip,sizeof strip,"TEMP:%.1fC | RH:%.0f%% | Vz:%+.1fm/s",T,RH,vz);
  }else{
- strcpy(altitude,"NO DATA");strcpy(pressure,"-- hPa");strcpy(density,"-- kg/m3");strcpy(strip,"CHECK SENSOR / I2C WIRING");
+ strcpy(altitude,"NO DATA");strcpy(pressure,"-- hPa");strcpy(density,"-- kg/m3");strcpy(strip,statusLine);
  }
  String view=String(altitude)+pressure+density+strip+battery;
  if(view==lastView && !dirty)return;
@@ -72,9 +73,23 @@ void setup(){
  auto cfg=M5.config();cfg.internal_spk=false;cfg.clear_display=true;
  M5.begin(cfg);
  canvas.setColorDepth(1);canvas.createSprite(200,200);canvas.setTextWrap(false);
- Wire.begin(25,26,100000);
- bool bp=bmp.begin(0x76);bool ah=aht.begin(&Wire);sensors=bp&&ah;
- Serial.printf("BMP280@0x76:%d AHT20@0x38:%d\n",bp,ah);
+ Wire.end();
+ bool bus=Wire.begin(25,26,100000);
+ unsigned found=0;
+ if(bus)for(uint8_t addr=8;addr<=0x77;++addr){
+  Wire.beginTransmission(addr);
+  if(Wire.endTransmission()==0){++found;Serial.printf("I2C device: 0x%02X\n",addr);}
+ }
+ bool bp=found && bmp.begin(0x76);
+ if(found && !bp)bp=bmp.begin(0x77);
+ bool ah=found && aht.begin(&Wire);
+ sensors=bp&&ah;
+ if(!bus)statusLine="I2C START FAILED";
+ else if(!found)statusLine="NO I2C DEVICES";
+ else if(!bp && !ah)statusLine="BOTH SENSORS FAILED";
+ else if(!bp)statusLine="BMP280 NOT DETECTED";
+ else if(!ah)statusLine="AHT20 NOT DETECTED";
+ Serial.printf("I2C devices=%u BMP280=%d AHT20=%d\n",found,bp,ah);
  if(sensors)sample();render();sampleAt=millis();
 }
 void loop(){
